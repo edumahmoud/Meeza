@@ -151,16 +151,27 @@ const Sales: React.FC<SalesProps> = ({ products, invoices, onSaveInvoice, onDedu
     if (isScannerOpen) {
       stopScanner();
     } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          setIsScannerOpen(true);
+      setIsScannerOpen(true);
+      // تأخير بسيط لضمان وجود عنصر الـ video في الـ DOM قبل تشغيل الكاميرا
+      setTimeout(async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+              facingMode: 'environment',
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            } 
+          });
+          streamRef.current = stream;
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.play();
+          }
+        } catch (err) {
+          setIsScannerOpen(false);
+          onShowToast?.("تعذر الوصول إلى الكاميرا. يرجى التحقق من الصلاحيات.", "error");
         }
-      } catch (err) {
-        onShowToast?.("تعذر الوصول إلى الكاميرا. يرجى التحقق من الصلاحيات.", "error");
-      }
+      }, 150);
     }
   };
 
@@ -331,7 +342,7 @@ const Sales: React.FC<SalesProps> = ({ products, invoices, onSaveInvoice, onDedu
          </div>
       </div>
 
-      {/* نافذة الكاميرا */}
+      {/* نافذة الكاميرا - تم إصلاح منطق العرض والتنسيق */}
       {isScannerOpen && (
         <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[2000] flex flex-col items-center justify-center p-4">
           <div className="bg-white rounded-[2rem] w-full max-w-lg overflow-hidden relative shadow-2xl border-4 border-indigo-600">
@@ -344,24 +355,27 @@ const Sales: React.FC<SalesProps> = ({ products, invoices, onSaveInvoice, onDedu
                 <X size={24} />
               </button>
             </div>
-            <div className="relative aspect-video bg-black">
+            {/* حاوية الفيديو بأبعاد ثابتة وتنسيق يضمن التمدد */}
+            <div id="camera-preview-container" className="relative w-full h-64 md:h-80 bg-black overflow-hidden flex items-center justify-center">
               <video 
                 ref={videoRef} 
                 autoPlay 
                 playsInline 
-                className="w-full h-full object-cover grayscale brightness-110"
+                muted
+                className="absolute inset-0 w-full h-full object-cover grayscale brightness-110"
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-64 h-32 border-2 border-indigo-400 rounded-lg relative overflow-hidden">
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                <div className="w-64 h-32 border-2 border-indigo-400/50 rounded-lg relative overflow-hidden">
                   <div className="absolute top-0 left-0 w-full h-0.5 bg-indigo-500 shadow-[0_0_15px_#6366f1] animate-[scan_2s_linear_infinite]" />
                 </div>
               </div>
-              <p className="absolute bottom-4 left-0 right-0 text-center text-white/70 text-[10px] font-bold">ضع الباركود داخل الإطار للمسح</p>
+              <p className="absolute bottom-4 left-0 right-0 text-center text-white/70 text-[10px] font-bold z-10">ضع الباركود داخل الإطار للمسح</p>
             </div>
             <div className="p-4 bg-slate-50 flex justify-center">
               <button 
                 onClick={stopScanner}
-                className="px-10 py-3 bg-rose-600 text-white font-black rounded-xl text-xs hover:bg-rose-700 transition-all shadow-lg"
+                className="px-10 py-3 bg-rose-600 text-white font-black rounded-xl text-[10px] hover:bg-rose-700 transition-all shadow-lg"
               >
                 إغلاق الكاميرا
               </button>
