@@ -1,10 +1,10 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 import { 
   Search, ShoppingCart, Trash2, Plus, Minus, Save, User, Phone, Tag, X, Eye, 
   History, FileText, DownloadCloud, MessageCircle, Copy, Check, AlertCircle, Info, UserCheck, Printer,
-  Hash, Calendar
+  Hash, Calendar, Camera, ScanLine
 } from 'lucide-react';
 import { Product, SaleItem, Invoice, ViewType } from '../types';
 import { jsPDF } from 'jspdf';
@@ -110,6 +110,9 @@ const Sales: React.FC<SalesProps> = ({ products, invoices, onSaveInvoice, onDedu
   const [invoiceNote, setInvoiceNote] = useState('');
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const todayDate = new Date().toLocaleDateString('ar-EG');
   const todayInvoices = useMemo(() => invoices.filter(inv => inv.date === todayDate && !inv.isDeleted), [invoices, todayDate]);
@@ -142,6 +145,61 @@ const Sales: React.FC<SalesProps> = ({ products, invoices, onSaveInvoice, onDedu
     const matched = products.find(p => p.code === searchTerm && !p.isDeleted);
     if (matched) { addToCart(matched); onShowToast?.(`تم مسح صنف: ${matched.name}`, "success"); setSearchTerm(''); }
   }, [searchTerm, products]);
+
+  // ميزة الكاميرا والماسح الضوئي
+  const toggleScanner = async () => {
+    if (isScannerOpen) {
+      stopScanner();
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          setIsScannerOpen(true);
+        }
+      } catch (err) {
+        onShowToast?.("تعذر الوصول إلى الكاميرا. يرجى التحقق من الصلاحيات.", "error");
+      }
+    }
+  };
+
+  const stopScanner = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setIsScannerOpen(false);
+  };
+
+  useEffect(() => {
+    let animationFrame: number;
+    const detectBarcode = async () => {
+      if (isScannerOpen && videoRef.current && (window as any).BarcodeDetector) {
+        const barcodeDetector = new (window as any).BarcodeDetector({ formats: ['code_128', 'ean_13', 'qr_code'] });
+        try {
+          const barcodes = await barcodeDetector.detect(videoRef.current);
+          if (barcodes.length > 0) {
+            const code = barcodes[0].rawValue;
+            setSearchTerm(code);
+            onShowToast?.("تم التقاط الكود بنجاح", "success");
+            stopScanner();
+          }
+        } catch (e) {
+          // Detect logic fail silently to retry
+        }
+      }
+      if (isScannerOpen) {
+        animationFrame = requestAnimationFrame(detectBarcode);
+      }
+    };
+
+    if (isScannerOpen) {
+      animationFrame = requestAnimationFrame(detectBarcode);
+    }
+
+    return () => cancelAnimationFrame(animationFrame);
+  }, [isScannerOpen]);
 
   const handleDownloadPDF = async (inv: Invoice) => {
     if (!inv) return;
@@ -221,6 +279,7 @@ const Sales: React.FC<SalesProps> = ({ products, invoices, onSaveInvoice, onDedu
 
   return (
     <div className="space-y-6 md:space-y-8 animate-in font-['Cairo'] pb-12 w-full max-w-full overflow-x-hidden select-text" dir="rtl">
+      {/* Search and Customer Info */}
       <div className="bg-white p-5 md:p-6 lg:p-8 rounded-[1.5rem] md:rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col gap-6 no-print">
          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
             <div className="space-y-2">
@@ -241,9 +300,24 @@ const Sales: React.FC<SalesProps> = ({ products, invoices, onSaveInvoice, onDedu
               </div>
             </div>
          </div>
-         <div className="relative">
-            <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input type="text" placeholder="ابحث عن صنف أو امسح الباركود..." className="w-full pr-11 pl-4 py-4 md:py-5 bg-white rounded-xl outline-none font-black text-sm md:text-base border border-slate-200 focus:ring-4 focus:ring-indigo-500/5 transition-all" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+         <div className="relative flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input 
+                type="text" 
+                placeholder="ابحث عن صنف أو امسح الباركود..." 
+                className="w-full pr-11 pl-12 py-4 md:py-5 bg-white rounded-xl outline-none font-black text-sm md:text-base border border-slate-200 focus:ring-4 focus:ring-indigo-500/5 transition-all" 
+                value={searchTerm} 
+                onChange={e => setSearchTerm(e.target.value)} 
+              />
+              <button 
+                onClick={toggleScanner}
+                className={`absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-lg transition-all ${isScannerOpen ? 'bg-rose-100 text-rose-600' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}
+                title="فتح الكاميرا لمسح الباركود"
+              >
+                <Camera size={20} />
+              </button>
+            </div>
             {searchTerm && products.some(p => !p.isDeleted && p.name.toLowerCase().includes(searchTerm.toLowerCase())) && (
                <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-[1.5rem] shadow-2xl z-50 max-h-80 overflow-y-auto divide-y divide-slate-50">
                   {products.filter(p => !p.isDeleted && p.name.toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
@@ -256,6 +330,52 @@ const Sales: React.FC<SalesProps> = ({ products, invoices, onSaveInvoice, onDedu
             )}
          </div>
       </div>
+
+      {/* نافذة الكاميرا */}
+      {isScannerOpen && (
+        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[2000] flex flex-col items-center justify-center p-4">
+          <div className="bg-white rounded-[2rem] w-full max-w-lg overflow-hidden relative shadow-2xl border-4 border-indigo-600">
+            <div className="bg-indigo-600 p-4 text-white flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <Camera size={20} />
+                <h3 className="font-black text-sm">ماسح باركود ميزة</h3>
+              </div>
+              <button onClick={stopScanner} className="p-1 hover:bg-white/20 rounded-full transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+            <div className="relative aspect-video bg-black">
+              <video 
+                ref={videoRef} 
+                autoPlay 
+                playsInline 
+                className="w-full h-full object-cover grayscale brightness-110"
+              />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-64 h-32 border-2 border-indigo-400 rounded-lg relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-full h-0.5 bg-indigo-500 shadow-[0_0_15px_#6366f1] animate-[scan_2s_linear_infinite]" />
+                </div>
+              </div>
+              <p className="absolute bottom-4 left-0 right-0 text-center text-white/70 text-[10px] font-bold">ضع الباركود داخل الإطار للمسح</p>
+            </div>
+            <div className="p-4 bg-slate-50 flex justify-center">
+              <button 
+                onClick={stopScanner}
+                className="px-10 py-3 bg-rose-600 text-white font-black rounded-xl text-xs hover:bg-rose-700 transition-all shadow-lg"
+              >
+                إغلاق الكاميرا
+              </button>
+            </div>
+          </div>
+          <style>{`
+            @keyframes scan {
+              0% { top: 0; }
+              50% { top: 100%; }
+              100% { top: 0; }
+            }
+          `}</style>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8 no-print">
         <div className="md:col-span-7 lg:col-span-8 space-y-6">
@@ -331,7 +451,7 @@ const Sales: React.FC<SalesProps> = ({ products, invoices, onSaveInvoice, onDedu
 
       <div className="bg-white rounded-[1.5rem] md:rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden no-print">
         <div className="p-6 md:p-10 border-b bg-slate-50/20 flex items-center gap-4"><div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl shadow-sm"><History size={24}/></div><h3 className="text-sm md:text-lg font-black text-slate-800">نشاط مبيعات اليوم</h3></div>
-        <div className="overflow-x-auto"><table className="w-full text-right text-[11px] min-w-[1000px]"><thead className="bg-slate-50 text-slate-400 font-black uppercase text-[9px] border-b"><tr><th className="px-8 py-5">رقم السند</th><th className="px-8 py-5">توقيت</th><th className="px-8 py-5">العميل</th><th className="px-8 py-5 text-center">الإجمالي</th><th className="px-8 py-5 text-center">الخصم</th><th className="px-8 py-5 text-center">الصافي</th><th className="px-8 py-5 text-left">الإجراءات</th></tr></thead>
+        <div className="overflow-x-auto"><table className="w-full text-right text-[11px] min-w-[1000px]"><thead className="bg-slate-50 text-slate-400 font-black uppercase text-[9px] border-b"><tr><th className="px-8 py-5">رقم السند</th><th className="px-8 py-5">توقيت</th><th className="px-8 py-5">العميل</th><th className="px-8 py-5 text-center">الإجمالي</th><th className="px-8 py-5 text-center">الخصم (%)</th><th className="px-8 py-5 text-center">الصافي</th><th className="px-8 py-5 text-left">الإجراءات</th></tr></thead>
             <tbody className="divide-y divide-slate-50 font-bold">{todayInvoices.length > 0 ? todayInvoices.slice(0, 10).map(inv => {
                   const discountAmt = inv.totalBeforeDiscount - inv.netTotal;
                   const discountPerc = inv.totalBeforeDiscount > 0 ? ((discountAmt / inv.totalBeforeDiscount) * 100).toFixed(0) : 0;
@@ -347,7 +467,7 @@ const Sales: React.FC<SalesProps> = ({ products, invoices, onSaveInvoice, onDedu
                     <td className="px-8 py-4 text-slate-700 truncate max-w-[150px]">{inv.customerName || 'نقدي'}</td>
                     <td className="px-8 py-4 text-center text-slate-400">{inv.totalBeforeDiscount.toLocaleString()} ج.م</td>
                     <td className="px-8 py-4 text-center text-rose-500">
-                      <span className="font-black">{discountAmt.toLocaleString()} ج.م</span>
+                      {discountAmt.toLocaleString()} ج.م
                       <span className="text-[9px] font-black block opacity-60">({discountPerc}%)</span>
                     </td>
                     <td className="px-8 py-4 text-center font-black text-slate-900">{inv.netTotal.toLocaleString()} ج.م</td>
